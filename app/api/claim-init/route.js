@@ -1,37 +1,34 @@
 // =======================================================================================
-// FILENAME: miniapp-frontend/app/api/claim-init/route.js (KODE MONOLITIK LENGKAP)
-// DESKRIPSI: Endpoint tunggal yang menangani Frame POST, Verifikasi, Signing, dan Tx Encoding.
+// FILENAME: miniapp-frontend/app/api/claim-init/route.js (FINAL FIX)
 // =======================================================================================
 
 import { NextResponse } from 'next/server';
 import { encodeFunctionData } from 'viem'; 
-import { privateKeyToAccount } from 'viem/accounts'; 
-import { base } from 'viem/chains';
-import { signTypedData } from 'viem';
 
+// --- PERBAIKAN UTAMA: Ambil kedua fungsi signing dari viem/accounts ---
+import { privateKeyToAccount, signTypedData } from 'viem/accounts'; 
+// =======================================================================
+
+import { base } from 'viem/chains';
 // Import untuk Firestore
 import { db } from '@/firebaseConfig';
 import { collection, getDocs } from 'firebase/firestore'; 
-
 // Import untuk Neynar
 import { NeynarAPIClient, Configuration } from '@neynar/nodejs-sdk'; 
 
-
-// --- KONFIGURASI KRITIS (Diambil dari Vercel Environment Variables) ---
-// HARUS DIATUR DI VERCEL ENV VARS!
+// --- KONFIGURASI KRITIS (Ambil dari Vercel Environment Variables) ---
 const ADMIN_PRIVATE_KEY = process.env.ADMIN_PRIVATE_KEY; 
 const NEYNAR_API_KEY = process.env.NEYNAR_API_KEY;
 const FARCONNECT_CONTRACT_ADDRESS = '0x7d0ecbb0d5a319f5D18143E16DD5394Ad67330CD'; 
 
 // --- INISIALISASI KLIEN GLOBAL ---
-// Klien diinisialisasi di luar handler untuk reusabilitas (kecuali BASE_RPC_URL tidak diperlukan karena ini tidak melakukan publicClient call)
 const signerAccount = ADMIN_PRIVATE_KEY ? privateKeyToAccount(ADMIN_PRIVATE_KEY) : null; 
 const neynarConfig = new Configuration({ apiKey: NEYNAR_API_KEY });
 const neynarClient = new NeynarAPIClient(neynarConfig);
 
-
-// ABI fungsi requestClaim
+// ... (REQUEST_CLAIM_ABI dan fungsi getActiveJob tetap sama) ...
 const REQUEST_CLAIM_ABI = [
+  // ... (ABI array lengkap Anda di sini) ...
   {
     "inputs": [
       {"internalType":"uint256","name":"_jobId","type":"uint256"},
@@ -50,7 +47,7 @@ const REQUEST_CLAIM_ABI = [
   }
 ];
 
-// --- Fungsi untuk mendapatkan data Job dari Firestore ---
+// ... (Fungsi getActiveJob tetap sama) ...
 async function getActiveJob() {
   const jobsRef = collection(db, "active_jobs"); 
   const snapshot = await getDocs(jobsRef);
@@ -64,18 +61,18 @@ async function getActiveJob() {
   };
 }
 
+// ... (Fungsi POST(req) selanjutnya tetap sama) ...
 
-// =======================================================================================
-// FUNGSI UTAMA (ENDPOINT FRAME POST)
-// =======================================================================================
 export async function POST(req) {
     if (!signerAccount) {
         return NextResponse.json({ message: "Konfigurasi Server Gagal: ADMIN_PRIVATE_KEY tidak ditemukan." }, { status: 500 });
     }
-
-    let fid, recipientAddress;
+    // ... (Logika Ekstraksi Data Frame dan Verifikasi Neynar) ...
     
-    // 1. Ekstraksi Data dari Frame
+    // ------------------------------------
+    // LANJUT DARI SINI: PENANDATANGANAN EIP-712
+    // ------------------------------------
+    let fid, recipientAddress;
     try {
         const body = await req.json();
         fid = body.untrustedData.fid;
@@ -88,13 +85,11 @@ export async function POST(req) {
         return NextResponse.json({ message: "Gagal memproses Frame POST body." }, { status: 400 });
     }
 
-    // 2. Ambil Data Job (Firestore)
     const activeJob = await getActiveJob();
     if (!activeJob) {
         return NextResponse.json({ message: "Tidak ada Job Aktif yang ditemukan di Firestore." }, { status: 404 });
     }
 
-    // 3. Siapkan Payload Klaim
     const currentTimeInSeconds = Math.floor(Date.now() / 1000);
     const claimPayload = {
         jobId: activeJob.id,
@@ -105,10 +100,7 @@ export async function POST(req) {
         deadline: (currentTimeInSeconds + 60).toString(), 
         lockDuration: '86400', 
     };
-    
-    // ------------------------------------
-    // 4. VERIFIKASI ANTI-BOT (Neynar)
-    // ------------------------------------
+
     try {
         const user = await neynarClient.fetchBulkUsers([fid], { viewer_fid: fid });
         const userData = user.users[0];
@@ -116,18 +108,9 @@ export async function POST(req) {
         if (!userData || userData.power_badge === false || userData.active_status !== 'active') {
              return NextResponse.json({ message: "Klaim Ditolak: Validasi anti-bot gagal. Pengguna harus aktif." }, { status: 403 });
         }
-    } catch (e) {
-        console.error("Kesalahan Verifikasi Neynar:", e);
-        return NextResponse.json({ message: "Verifikasi Neynar Gagal." }, { status: 500 });
-    }
-    
-    // ------------------------------------
-    // 5. PENANDATANGANAN EIP-712 (Signing)
-    // ------------------------------------
-    let signature;
-    const { jobId, recipientAddress: recipient, amount, nonce, deadline, lockDuration } = claimPayload;
-    
-    try {
+        
+        const { jobId, recipientAddress: recipient, amount, nonce, deadline, lockDuration } = claimPayload;
+
         const types = {
             RequestClaim: [
                 { name: 'jobId', type: 'uint256' }, { name: 'fid', type: 'uint256' }, 
@@ -149,11 +132,11 @@ export async function POST(req) {
             lockDuration: BigInt(lockDuration),
         };
         
-        signature = await signTypedData({
+        const signature = await signTypedData({
             account: signerAccount, domain, types, primaryType: 'RequestClaim', message: value,
         });
 
-        // 6. Encode Transaksi On-Chain
+        // Encode Transaksi On-Chain
         const encodedData = encodeFunctionData({
             abi: REQUEST_CLAIM_ABI,
             functionName: 'requestClaim',
@@ -164,7 +147,7 @@ export async function POST(req) {
             ],
         });
 
-        // 7. Kembalikan Respon 'tx' ke Farcaster
+        // Kembalikan Respon 'tx' ke Farcaster
         return NextResponse.json({
             tx: {
                 chainId: `eip155:8453`, // Base Mainnet

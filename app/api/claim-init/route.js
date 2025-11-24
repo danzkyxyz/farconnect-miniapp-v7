@@ -1,14 +1,14 @@
 // =======================================================================================
-// FILENAME: miniapp-frontend/app/api/claim-init/route.js (KODE TUNGGAL FINAL)
-// DESKRIPSI: Menangani Frame POST, Verifikasi, Signing, dan Tx Encoding.
+// FILENAME: miniapp-frontend/app/api/claim-init/route.js (KODE TUNGGAL FINAL & BEBAS ERROR IMPOR)
 // =======================================================================================
 
 import { NextResponse } from 'next/server';
 
-// Import Viem (Dipecah untuk kompatibilitas Next.js Serverless)
+// --- PERBAIKAN IMPORT VIEM (Hanya encodeFunctionData di root) ---
 import { encodeFunctionData } from 'viem'; 
-import { privateKeyToAccount, signTypedData } from 'viem/accounts'; 
+import { privateKeyToAccount, signTypedData } from 'viem/accounts'; // signTypedData HARUS dari accounts
 import { base } from 'viem/chains';
+// -----------------------------------------------------------------
 
 // Import Firestore
 import { db } from '@/firebaseConfig';
@@ -18,7 +18,7 @@ import { collection, getDocs } from 'firebase/firestore';
 import { NeynarAPIClient, Configuration } from '@neynar/nodejs-sdk'; 
 
 
-// --- KONFIGURASI KRITIS (Ambil dari Vercel Environment Variables) ---
+// --- KONFIGURASI KRITIS ---
 const ADMIN_PRIVATE_KEY = process.env.ADMIN_PRIVATE_KEY; 
 const NEYNAR_API_KEY = process.env.NEYNAR_API_KEY;
 const FARCONNECT_CONTRACT_ADDRESS = '0x7d0ecbb0d5a319f5D18143E16DD5394Ad67330CD'; 
@@ -164,7 +164,7 @@ export async function POST(req) {
             ],
         });
 
-        // 6. Kembalikan Respon 'tx' ke Farcaster (Memicu Wallet)
+        // 6. Kembalikan Respon 'tx' ke Farcaster
         return NextResponse.json({
             tx: {
                 chainId: `eip155:8453`, // Base Mainnet
